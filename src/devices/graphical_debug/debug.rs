@@ -56,7 +56,16 @@ impl DebugDisplay {
         for &b in buf {
             if self.x >= self.w || b == b'\n' {
                 self.x = 0;
-                self.y = (self.y + 1) % self.h;
+                self.y += 1;
+                // Instead of wrapping the cursor back over old text as a
+                // ring (which leaves the previous pass's lines visible
+                // below the cursor), clear the screen and restart at the
+                // top. Scrolling every line would mean a full-frame copy
+                // over the non-cacheable framebuffer.
+                if self.y >= self.h {
+                    self.y = 0;
+                    self.clear();
+                }
             }
 
             if b == b'\r' {
@@ -105,6 +114,16 @@ impl DebugDisplay {
             self.char(self.x * 8, self.y * 16, b as char, 0xFFFFFF);
 
             self.x += 1;
+        }
+    }
+
+    fn clear(&mut self) {
+        unsafe {
+            ptr::write_bytes(
+                self.display.onscreen_ptr,
+                0,
+                self.display.stride * self.display.height,
+            );
         }
     }
 
