@@ -131,8 +131,11 @@ impl InterruptController for GicV3 {
         unsafe { self.gic_dist_if.irq_disable(irq_num) }
     }
     fn irq_configure(&mut self, irq_data: IrqCell) -> Result<()> {
+        // The fourth cell of a specifier is the PPI partition phandle,
+        // zero for SPIs; partitions are not supported, so it is only
+        // validated, never translated.
         let (irq, flags) = match irq_data {
-            IrqCell::L3(0, irq, flags) => (irq, flags), // SPI
+            IrqCell::L3(0, irq, flags) | IrqCell::L4(0, irq, flags, 0) => (irq, flags), // SPI
             _ => return Err(Error::new(EINVAL)),
         };
         let hwirq = irq.checked_add(32).ok_or_else(|| Error::new(EINVAL))?;
@@ -140,8 +143,8 @@ impl InterruptController for GicV3 {
     }
     fn irq_xlate(&self, irq_data: IrqCell) -> Result<usize> {
         let off = match irq_data {
-            IrqCell::L3(0, irq, _flags) => irq as usize + 32, // SPI
-            IrqCell::L3(1, irq, _flags) => irq as usize + 16, // PPI
+            IrqCell::L3(0, irq, _flags) | IrqCell::L4(0, irq, _flags, 0) => irq as usize + 32, // SPI
+            IrqCell::L3(1, irq, _flags) | IrqCell::L4(1, irq, _flags, _) => irq as usize + 16, // PPI
             _ => return Err(Error::new(EINVAL)),
         };
         return Ok(off + self.irq_range.0);

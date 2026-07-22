@@ -616,6 +616,7 @@ pub fn get_interrupt(fdt: &Fdt, node: &FdtNode, idx: usize) -> Option<IrqCell> {
         1 => Some(IrqCell::L1(intr.next()?)),
         2 if let Ok([a, b]) = intr.next_chunk() => Some(IrqCell::L2(a, b)),
         3 if let Ok([a, b, c]) = intr.next_chunk() => Some(IrqCell::L3(a, b, c)),
+        4 if let Ok([a, b, c, d]) = intr.next_chunk() => Some(IrqCell::L4(a, b, c, d)),
         _ => None,
     }
 }

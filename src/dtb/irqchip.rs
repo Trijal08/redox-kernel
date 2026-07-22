@@ -17,6 +17,9 @@ pub enum IrqCell {
     L1(u32),
     L2(u32, u32),
     L3(u32, u32, u32),
+    /// Used by GICv3 controllers with ppi-partitions: the fourth cell
+    /// is the partition phandle for PPIs and zero for SPIs.
+    L4(u32, u32, u32, u32),
 }
 
 pub trait InterruptController: InterruptHandler {
@@ -107,6 +110,9 @@ impl IrqChipList {
                         1 => Some(IrqCell::L1(iter.next()?)),
                         2 if let Ok([a, b]) = iter.next_chunk() => Some(IrqCell::L2(a, b)),
                         3 if let Ok([a, b, c]) = iter.next_chunk() => Some(IrqCell::L3(a, b, c)),
+                        4 if let Ok([a, b, c, d]) = iter.next_chunk() => {
+                            Some(IrqCell::L4(a, b, c, d))
+                        }
                         _ => None,
                     }
                 }
@@ -115,7 +121,8 @@ impl IrqChipList {
                     match addr {
                         IrqCell::L1(u32::MAX)
                         | IrqCell::L2(u32::MAX, _)
-                        | IrqCell::L3(u32::MAX, _, _) => None,
+                        | IrqCell::L3(u32::MAX, _, _)
+                        | IrqCell::L4(u32::MAX, _, _, _) => None,
                         _ => Some(addr),
                     }
                 }
@@ -307,6 +314,7 @@ impl IrqChipCore {
             1 => IrqCell::L1(irq_data[0]),
             2 => IrqCell::L2(irq_data[0], irq_data[1]),
             3 => IrqCell::L3(irq_data[0], irq_data[1], irq_data[2]),
+            4 => IrqCell::L4(irq_data[0], irq_data[1], irq_data[2], irq_data[3]),
             _ => return Err(Error::new(EINVAL)),
         };
         self.irq_chip_list.chips[ic_idx].ic.irq_xlate(irq_data)
