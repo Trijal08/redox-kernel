@@ -3,7 +3,7 @@ use spin::Mutex;
 use syscall::Mmio;
 
 use crate::{
-    devices::{serial::SerialKind, uart_16550, uart_meson, uart_pl011},
+    devices::{serial::SerialKind, uart_16550, uart_meson, uart_pl011, uart_samsung},
     dtb::{diag_uart_params, diag_uart_range},
     memory::{RmmA, RmmArch},
 };
@@ -12,6 +12,7 @@ pub static COM1: Mutex<SerialKind> = Mutex::new(SerialKind::NotPresent);
 
 const MESON_UART_REGISTER_SIZE: usize = 0x18;
 const MESON_XTAL_HZ: u32 = 24_000_000;
+const SAMSUNG_UART_REGISTER_SIZE: usize = 0x3c;
 
 fn stdout_baud(dtb: &Fdt) -> Option<u32> {
     let params = diag_uart_params(dtb)?;
@@ -150,6 +151,42 @@ pub unsafe fn init_early(dtb: &Fdt) {
                     serial_port.init_early();
                 }
                 Some(SerialKind::Meson(serial_port))
+            } else if uart_samsung::is_compatible(compatible) {
+                if size < SAMSUNG_UART_REGISTER_SIZE || !virt.is_multiple_of(size_of::<u32>()) {
+                    warn!(
+                        "invalid Samsung UART MMIO range at {:#X}, size {:#X}",
+                        virt, size
+                    );
+                    return;
+                }
+
+                let Some(node) = crate::dtb::diag_uart_node(dtb) else {
+                    warn!("diagnostic UART disappeared while parsing DTB");
+                    return;
+                };
+                let Some(variant) = uart_samsung::Variant::from_compatible(compatible) else {
+                    warn!("unsupported Samsung UART compatible {:?}", compatible);
+                    return;
+                };
+                let variant = variant.with_reg_io_width(
+                    node.property("reg-io-width")
+                        .and_then(|property| property.as_usize()),
+                );
+                let baud_rate = stdout_baud(dtb)
+                    .filter(|&value| value != 0)
+                    .unwrap_or(115_200);
+                // Only fixed-rate baud clock providers can be evaluated.
+                // Programmable clock controllers (Exynos) yield None, in
+                // which case the firmware baud-rate setup is preserved.
+                let clock_rate = named_clock_rate(dtb, node, "clk_uart_baud0");
+                // SAFETY: diag_uart_range translated and validated the DT MMIO
+                // range, and this branch only accepts Samsung UART compatibles.
+                let mut serial_port =
+                    uart_samsung::SerialPort::new(virt, baud_rate, clock_rate, variant, skip_init);
+                if !skip_init {
+                    serial_port.init_early();
+                }
+                Some(SerialKind::Samsung(serial_port))
             } else {
                 None
             };

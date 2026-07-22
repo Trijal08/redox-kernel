@@ -3,7 +3,7 @@ use syscall::Mmio;
 use syscall::Pio;
 
 use crate::{
-    devices::{uart_16550, uart_meson, uart_pl011},
+    devices::{uart_16550, uart_meson, uart_pl011, uart_samsung},
     scheme::debug::{debug_input, debug_notify},
     sync::CleanLockToken,
 };
@@ -17,6 +17,7 @@ pub enum SerialKind {
     Ns16550u32(&'static mut uart_16550::SerialPort<Mmio<u32>>),
     Meson(uart_meson::SerialPort),
     Pl011(uart_pl011::SerialPort),
+    Samsung(uart_samsung::SerialPort),
 }
 
 impl SerialKind {
@@ -25,6 +26,7 @@ impl SerialKind {
         match self {
             Self::NotPresent => Err(()),
             Self::Meson(inner) => inner.init_full(),
+            Self::Samsung(inner) => inner.init_full(),
             _ => Ok(()),
         }
     }
@@ -40,6 +42,7 @@ impl SerialKind {
             Self::Ns16550u32(_) => {}
             Self::Meson(inner) => inner.enable_irq(),
             Self::Pl011(inner) => inner.enable_irq(),
+            Self::Samsung(inner) => inner.enable_irq(),
         }
     }
 
@@ -68,6 +71,7 @@ impl SerialKind {
             }
             Self::Meson(inner) => inner.receive(token),
             Self::Pl011(inner) => inner.receive(token),
+            Self::Samsung(inner) => inner.receive(token),
         }
     }
 
@@ -80,6 +84,7 @@ impl SerialKind {
             Self::Ns16550u32(inner) => inner.write(buf),
             Self::Meson(inner) => inner.write(buf),
             Self::Pl011(inner) => inner.write(buf),
+            Self::Samsung(inner) => inner.write(buf),
         }
     }
 }
