@@ -20,7 +20,13 @@ impl InterruptHandler for Com1Irq {
         unsafe {
             // FIXME add_irq accepts a u8 as irq number
             // PercpuBlock::current().stats.add_irq(irq);
-            irq_trigger(irq.try_into().unwrap(), token);
+            // irq_trigger notifies userspace `irq:` handlers, which are keyed
+            // by a u8. Virqs above 255 (this SoC's UART SPI is 673) can't be
+            // represented; the console is kernel-owned with no userspace
+            // listener, so skip the notification rather than panicking.
+            if let Ok(irq) = u8::try_from(irq) {
+                irq_trigger(irq, token);
+            }
             IRQ_CHIP.irq_eoi(irq);
         }
     }
