@@ -26,7 +26,7 @@ pub unsafe fn init(fdt: &Fdt) {
     unsafe {
         let mut timer = GenericTimer::new();
         timer.init();
-        if let Some(node) = fdt.find_compatible(&["arm,armv7-timer"]) {
+        if let Some(node) = fdt.find_compatible(&["arm,armv7-timer", "arm,armv8-timer"]) {
             let irq = get_interrupt(fdt, &node, 1).unwrap();
             debug!("irq = {:?}", irq);
             if let Some(ic_idx) = ic_for_chip(&fdt, &node) {
