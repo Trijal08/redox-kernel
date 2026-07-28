@@ -15,11 +15,13 @@ use syscall::{
 
 static GICD_CTLR: u32 = 0x000;
 static GICD_TYPER: u32 = 0x004;
+static GICD_IGROUPR: u32 = 0x080;
 static GICD_ISENABLER: u32 = 0x100;
 static GICD_ICENABLER: u32 = 0x180;
 static GICD_IPRIORITY: u32 = 0x400;
 static GICD_ITARGETSR: u32 = 0x800;
 static GICD_ICFGR: u32 = 0xc00;
+static GICD_IROUTER: u32 = 0x6000;
 
 static GICC_EOIR: u32 = 0x0010;
 static GICC_IAR: u32 = 0x000c;
@@ -262,6 +264,30 @@ impl GicDistIf {
         Ok(())
     }
 
+    /// GICv3-only: place an SPI in Group 1 Non-secure and route it to the
+    /// PE with the given MPIDR-style affinity (IRM=0). Without this an SPI
+    /// is enabled in the distributor but never targeted at a CPU, and if
+    /// firmware left it in Group 0 the ICC_IAR1_EL1 (Group 1) interface
+    /// never returns it. PPIs/SGIs (INTID < 32) have neither register here
+    /// and are left to the redistributor, so they are skipped.
+    pub unsafe fn irq_route(&mut self, irq: u32, affinity: u64) {
+        if irq < 32 || irq >= self.nirqs {
+            return;
+        }
+        unsafe {
+            let group_offset = GICD_IGROUPR + (4 * (irq / 32));
+            let group_bit = 1 << (irq % 32);
+            let group = self.read(group_offset) | group_bit;
+            self.write(group_offset, group);
+
+            // GICD_IROUTER<n> is a 64-bit register, one per SPI.
+            let route_offset = self.address + (GICD_IROUTER + 8 * irq) as usize;
+            write_volatile(route_offset as *mut u32, affinity as u32);
+            write_volatile((route_offset + 4) as *mut u32, (affinity >> 32) as u32);
+            info!("gic: routed SPI {} to affinity {:#x}", irq, affinity);
+        }
+    }
+
     unsafe fn read(&self, reg: u32) -> u32 {
         unsafe {
             let val = read_volatile((self.address + reg as usize) as *const u32);
@@ -295,11 +321,10 @@ impl GicCpuIf {
 
     unsafe fn irq_ack(&mut self) -> u32 {
         unsafe {
-            let irq = self.read(GICC_IAR) & 0x1ff;
-            if irq == 1023 {
-                panic!("irq_ack: got ID 1023!!!");
-            }
-            irq
+            // GICC_IAR reports the INTID in bits [9:0]; the old 9-bit
+            // mask truncated INTIDs above 511. IDs 1020-1023 signal a
+            // spurious interrupt and are dropped later by irq_to_virq.
+            self.read(GICC_IAR) & 0x3ff
         }
     }
 

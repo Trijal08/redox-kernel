@@ -125,7 +125,16 @@ impl InterruptController for GicV3 {
         unsafe { self.gic_cpu_if.irq_eoi(irq_num) }
     }
     fn irq_enable(&mut self, irq_num: u32) {
-        unsafe { self.gic_dist_if.irq_enable(irq_num) }
+        unsafe {
+            // Route SPIs to this (the boot) PE and put them in Group 1 NS
+            // before enabling; the distributor init only programs the
+            // GICv2 ITARGETSR, which is RES0 under GICv3 affinity routing.
+            let mpidr: u64;
+            asm!("mrs {}, mpidr_el1", out(reg) mpidr);
+            self.gic_dist_if
+                .irq_route(irq_num, mpidr & 0x0000_00ff_00ff_ffff);
+            self.gic_dist_if.irq_enable(irq_num);
+        }
     }
     fn irq_disable(&mut self, irq_num: u32) {
         unsafe { self.gic_dist_if.irq_disable(irq_num) }
@@ -191,10 +200,13 @@ impl GicV3CpuIf {
         unsafe {
             let mut irq: usize;
             asm!("mrs {}, icc_iar1_el1", out(reg) irq);
-            irq &= 0x1ff;
-            if irq == 1023 {
-                panic!("irq_ack: got ID 1023!!!");
-            }
+            // ICC_IAR1_EL1 reports the INTID in bits [23:0]. The old
+            // 9-bit mask truncated any INTID above 511 (e.g. this SoC's
+            // UART SPI at 673 became 161), so the interrupt was acked as
+            // the wrong ID, dispatched to the wrong handler, and never
+            // EOI'd. Special INTIDs 1020-1023 signal no/spurious
+            // interrupt and are dropped later by irq_to_virq.
+            irq &= 0xffffff;
             irq as u32
         }
     }
